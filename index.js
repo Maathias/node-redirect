@@ -10,7 +10,7 @@ const http = require('http'),
 
 var server = http.createServer(function (req, res) {
 	var at = req.url.substring(1),
-		ip = req.headers['X-Real-IP'] ? req.headers['X-Real-IP'] : req.connection.remoteAddress,
+		ip = req.headers['x-real-ip'] ? req.headers['x-real-ip'] : req.connection.remoteAddress,
 
 		who = (function (req) {
 			var list = {},
