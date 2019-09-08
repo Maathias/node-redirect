@@ -8,6 +8,21 @@ const http = require('http'),
 		port: 3500
 	};
 
+function log(data){
+	var d = new Date,
+		out = new String,
+		h = d.getHours() < 10 ? "0" + d.getHours() : d.getHours(),
+		m = d.getMinutes() < 10 ? "0" + d.getMinutes() : d.getMinutes(),
+		s = d.getSeconds() < 10 ? "0" + d.getSeconds() : d.getSeconds(),
+		ms = (function () {
+			let ms = d.getMilliseconds()
+			return ms < 10 ? '00' + ms : (ms < 100 ? '0' + ms : ms)
+		})()
+
+	
+	console.log(`${d.getDate()}/${d.getMonth()+1} ${h}:${m}:${s}:${ms} ${data}`)
+}
+
 var server = http.createServer(function (req, res) {
 	var at = req.url.substring(1),
 		ip = req.headers['x-real-ip'] ? req.headers['x-real-ip'] : req.connection.remoteAddress,
@@ -60,22 +75,22 @@ var server = http.createServer(function (req, res) {
 	if (where === false) {
 		res.writeHead(404);
 		res.end();
-		console.log(`! ${at} [${ip}] (${who})`)
+		log(`! ${at} [${ip}] (${who})`)
 	} else {
 		res.setHeader('Location', where)
 		res.writeHead(302)
-		res.end(`Location:\t${where}\nAddr:\t\t${ip}\nToken:\t\t${who}`);
-		console.log(`# ${at} 200 -> '${where}' [${ip}] (${who})`)
+		res.end(/*`Location:\t${where}\nAddr:\t\t${ip}\nToken:\t\t${who}`*/);
+		log(`# ${at} 200 -> '${where}' [${ip}] (${who})`)
 	}
 });
 
 fs.readdir(path.join(__dirname, 'configs'), (err, files) => {
 	files.forEach(file => {
-		console.log(`Loaded '${file.slice(0, -5)}' config`)
+		log(`Loaded '${file.slice(0, -5)}' config`)
 		redir[file.slice(0, -5)] = require(`./configs/${file}`)
 	});
 
 	server.listen(config.port);
-	console.log(`Server listening on port ${config.port}\n`)
+	log(`Server listening on port ${config.port}\n`)
 
 });
