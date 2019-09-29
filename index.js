@@ -3,12 +3,16 @@
 const http = require('http'),
 	fs = require('fs'),
 	path = require('path'),
-	redir = {},
-	config = {
-		port: 3500
+	Tree = {},
+	Config = {
+		port: 3500,
+		token: 10,
+		default: 'https://www.maathias.pl/'
 	};
 
-function log(data){
+var AuthTable = {};
+
+function log(data) {
 	var d = new Date,
 		out = new String,
 		h = d.getHours() < 10 ? "0" + d.getHours() : d.getHours(),
@@ -19,15 +23,52 @@ function log(data){
 			return ms < 10 ? '00' + ms : (ms < 100 ? '0' + ms : ms)
 		})()
 
-	
-	console.log(`${d.getDate()}/${d.getMonth()+1} ${h}:${m}:${s}:${ms} ${data}`)
+
+	console.log(`${d.getDate()}/${d.getMonth() + 1} ${h}:${m}:${s}:${ms} ${data}`)
+}
+
+function parseCredentials(req) {
+	const b64auth = (req.headers.authorization || '').split(' ')[1] || ''
+	const [login, pass] = new Buffer.from(b64auth, 'base64').toString().split(':')
+	return {
+		login: login === '' ? undefined : login,
+		pass: pass === '' ? undefined : pass
+	}
+}
+
+function requestAuth(res, realm, body) {
+	res.setHeader('WWW-Authenticate', 'Basic realm="' + realm + '"') // change this
+	res.writeHead(401)
+	res.end(body) // custom message 
+}
+
+function rejectAuth(res, body) {
+	res.writeHead(403)
+	res.end(body)
 }
 
 var server = http.createServer(function (req, res) {
-	var at = req.url.substring(1),
+
+	function status(code) {
+		log(`# ${at.path != '' ? at.path : "/"} | ${code} | ${ip} | ${who} | ${cred.login || ""}:${cred.pass || ""} | ${result ? "passed" : "failed"}`)
+	}
+
+	var cred = parseCredentials(req),
+
+		rules = AuthTable[cred.login + ':' + cred.pass] || AuthTable['*'],
+
+		at = (function () {
+			let reg = /\/([^\?\n]*)\??(.*=.*)?/.exec(req.url)
+			return {
+				full: req.url,
+				path: reg[1].endsWith('\/') ? reg[1].slice(0, -1) : reg[1],
+				query: reg[2]
+			}
+		})(),
+
 		ip = req.headers['x-real-ip'] ? req.headers['x-real-ip'] : req.connection.remoteAddress,
 
-		who = (function (req) {
+		who = (function () {
 			var list = {},
 				rc = req.headers.cookie;
 
@@ -35,62 +76,113 @@ var server = http.createServer(function (req, res) {
 				var parts = cookie.split('=');
 				list[parts.shift().trim()] = decodeURI(parts.join('='));
 			});
+			if (list.token === undefined) {
+				var token = "";
+				var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
 
-			return list.token;
-		})(req),
+				for (var i = 0; i < Config.token; i++)
+					token += chars.charAt(Math.floor(Math.random() * chars.length));
+				res.setHeader('Set-Cookie', `token=${token}; Path=/; Expires=Tue, 1 Jan 2040 00:00:00 GMT;`)
+			} else token = list.token
+			return token;
+		})(),
 
-		where = (function (where) {
-			if (where[0] == '') {
-				return 'https://www.maathias.pl/'
-			} else if (where.length == 1) {
-				if ('root' in redir) {
-					if (where[0] in redir.root) return redir.root[where[0]]
-					else return false
-				} else return false
-			} else {
-				var current = redir
-				for (let sub of where) {
-					if (sub == '') continue
-					if (typeof current == 'string') return false
-					if (sub in current) current = current[sub]
-					else return false
-				}
-				return current
+		where = (function () {
+			let dir = at.path.split('\/')
+
+			if (dir[0] == '') return {
+				content: Config.default,
+				location: true,
+				author: "root",
+				date: "today",
+				allowed: ["*"],
+				disallowed: []
 			}
-		})(at.split('/'))
 
-	if(who === undefined){
-		who = (function () {
-			var out = "";
-			var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+			if (dir.length == 1) {
+				if ('root' in Tree) {
+					if (dir[0] in Tree.root) return Tree.root[dir[0]]
+					else return null
+				} else return null
+			}
 
-			for (var i = 0; i < 25; i++)
-				out += chars.charAt(Math.floor(Math.random() * chars.length));
+			var current = Tree
+			for (let sub in dir) {
+				if (dir[sub] in current) current = current[dir[sub]]
+				if ('content' in current) {
+					if (sub < dir.length - 1) return null
+				}
 
-			return out;
+				// // if (sub == '') continue
+				// // if (typeof current == 'string') return null
+				// if('content' in current) break;
+
+				// if (sub in current) current = current[sub]
+				// else return null
+			}
+			return current
+
+		})(),
+
+		result = (function () {
+			if (where === null) return true
+			let allowed = where.allowed.indexOf(cred.login + ":" + cred.pass) == -1 ? false : true,
+				disallowed = where.disallowed.indexOf(cred.login + ":" + cred.pass) == -1 ? false : true
+
+			if (!allowed) allowed = where.allowed.indexOf(cred.login + ":*") == -1 ? false : true
+			if (!disallowed) disallowed = where.disallowed.indexOf(cred.login + ":*") == -1 ? false : true
+
+			if (!allowed) allowed = where.allowed.indexOf("*") == -1 ? false : true
+			if (!disallowed) disallowed = where.disallowed.indexOf("*") == -1 ? false : true
+
+			return allowed && !disallowed
 		})()
-		res.setHeader('Set-Cookie', `token=${who}`)
+
+	if (!result) {
+		if (!cred.login && !cred.pass) {
+			status(401)
+			requestAuth(res, "This link is protected", "Login and/or password required")
+			return
+		} else {
+			status(401)
+			requestAuth(res, "Wrong login/password", "Incorrect credentials")
+			return
+		}
 	}
 
-	if (where === false) {
+	if (where === null) {
+		status(404)
 		res.writeHead(404);
 		res.end();
-		log(`! ${at} [${ip}] (${who})`)
 	} else {
-		res.setHeader('Location', where)
+		status(302)
+		res.setHeader('Location', where.content)
 		res.writeHead(302)
-		res.end(/*`Location:\t${where}\nAddr:\t\t${ip}\nToken:\t\t${who}`*/);
-		log(`# ${at} 200 -> '${where}' [${ip}] (${who})`)
+		res.end()
 	}
+
 });
 
+log(`___Starting redirect server___`)
 fs.readdir(path.join(__dirname, 'configs'), (err, files) => {
+	log(`Loading configuration files [${files.length}]`)
+
 	files.forEach(file => {
 		log(`Loaded '${file.slice(0, -5)}' config`)
-		redir[file.slice(0, -5)] = require(`./configs/${file}`)
+		if (file === 'auth.json') {
+			AuthTable = require(`./configs/${file}`)
+			for (let user in AuthTable) {
+				for (let table in AuthTable[user]) {
+					for (let rule in AuthTable[user][table]) {
+						AuthTable[user][table][rule] = new RegExp(AuthTable[user][table][rule])
+					}
+				}
+			}
+		}
+		Tree[file.slice(0, -5)] = require(`./configs/${file}`)
 	});
 
-	server.listen(config.port);
-	log(`Server listening on port ${config.port}\n`)
+	server.listen(Config.port);
+	log(`Server listening on port ${Config.port}`)
 
 });
