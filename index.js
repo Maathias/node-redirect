@@ -165,6 +165,11 @@ var server = http.createServer(function (req, res) {
 
 log(`___Starting redirect server___`)
 fs.readdir(path.join(__dirname, 'configs'), (err, files) => {
+	if(err){
+		log(`Folder 'configs' is unavailable. Exiting`)
+		process.exit()
+	}
+
 	log(`Loading configuration files [${files.length}]`)
 
 	files.forEach(file => {
