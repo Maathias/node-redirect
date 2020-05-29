@@ -157,6 +157,8 @@ var server = http.createServer(function (req, res) {
 	} else {
 		status(302)
 		res.setHeader('Location', where.content)
+		res.setHeader('X-Link-Author', where.author)
+		res.setHeader('X-Link-Created', where.date)
 		res.writeHead(302)
 		res.end()
 	}
